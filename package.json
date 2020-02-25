@@ -5,6 +5,7 @@
   "main": "server.js",
   "dependencies": {
     "body-parser": "^1.19.0",
+    "chalk": "^3.0.0",
     "concurrently": "^5.0.2",
     "cors": "^2.8.5",
     "dotenv": "^8.2.0",
@@ -21,7 +22,5 @@
   },
   "author": "Mduduzi Ndhlovu",
   "license": "MIT",
-  "devDependencies": {
-    "chalk": "^3.0.0"
-  }
+  "devDependencies": {}
 }
