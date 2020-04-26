@@ -1,0 +1,17 @@
+language: node.js
+node_js:
+  - 12.14.1
+cache: yarn
+
+install:
+  - yarn install
+
+script:
+  - yarn run prod
+
+deploy:
+  provider: pages
+  skip-cleanup: true
+  github-token: $GITHUB_TOKEN
+  on:
+    branch: master
