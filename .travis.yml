@@ -8,7 +8,7 @@ install:
 
 script:
   - yarn test
-  - yarn run dev
+  - yarn run prod
 
 deploy:
   provider: pages
