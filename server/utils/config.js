@@ -1,22 +1,30 @@
 const dotenv = require("dotenv");
+
 dotenv.config();
 
 const environment = process.env.DEVELOPMENT ? "development" : "production";
-const PORT = process.env.PORT || 3000;
-const CLIENT_URL = "http//localhost:3000" || `${process.env.PROD_URL}:${PORT}`;
-const CONNECTION_URI = process.env.MONGODB_URI;
-const LOCAL_MONGO_DB = process.env.LOCAL_MONGO_DB;
+const isDevelopment = environment === "development";
 const S_GRID_API_KEY = process.env.SEND_GRID_API_KEY;
-const SENDER_EMAIL = process.env.SENDER_EMAIL;
-const TOKEN_SIGNATURE = process.env.TOKEN_SIGNATURE;
+
+const CONNECTION_URI = process.env.MONGODB_URI;
+const { LOCAL_MONGO_DB } = process.env;
+const PORT = process.env.PORT || 5000;
+
+const { PRIVATE_SIGNATURE, PUBLIC_SIGNATURE } = process.env;
+const ROOT_URL =
+  process.env.LOCAL_URL || `https://moneat.herokuapp.com:${PORT}`;
+
+const ALLOWED_UPDATE_FIELDS_USER = ["name", "email", "password"];
 
 module.exports = {
-  CLIENT_URL,
-  CONNECTION_URI,
+  ALLOWED_UPDATE_FIELDS_USER,
   environment,
+  ROOT_URL,
+  CONNECTION_URI,
   LOCAL_MONGO_DB,
   PORT,
   S_GRID_API_KEY,
-  SENDER_EMAIL,
-  TOKEN_SIGNATURE,
+  PUBLIC_SIGNATURE,
+  PRIVATE_SIGNATURE,
+  isDevelopment,
 };

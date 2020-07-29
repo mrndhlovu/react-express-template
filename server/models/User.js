@@ -1,52 +1,65 @@
-const mongoose = require("mongoose");
-const validate = require("validator");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const { TOKEN_SIGNATURE } = require("../utils/config");
+const mongoose = require("mongoose");
+const isEmail = require("validator/lib/isEmail");
+const { PRIVATE_SIGNATURE, ROOT_URL } = require("../utils/config");
+const { getRandom, tokenExpirationTime } = require("../utils/serverUtils");
 
 const UserSchema = new mongoose.Schema(
   {
-    fname: {
-      type: String,
-      required: true,
-      trim: true,
-      minlength: 4,
-    },
+    name: { type: String, trim: true, minlength: 4 },
+    dateOfBirth: { type: String },
     email: {
       type: String,
       lowercase: true,
       unique: true,
       trim: true,
-      required: true,
       validate(value) {
-        if (!validate.isEmail(value)) throw new Error("Email is invalid");
+        if (!isEmail(value)) throw new Error("Email provided is invalid!");
       },
     },
     password: {
       type: String,
       trim: true,
-      required: true,
       minlength: 7,
       validate(value) {
         if (value.toLowerCase().includes("password"))
-          throw new Error(`Password should not be 'password'`);
+          throw new Error("Password should not include 'password'!");
       },
     },
-    starred: {
-      type: Array,
-      required: true,
-      default: [],
+    phoneNumber: {
+      type: String,
+      trim: true,
+      validate(value) {
+        // TODO validate phone number based on locale
+        const numRegex = /^\d{10}$/;
+        const validNumber = numRegex.test(value);
+        if (!validNumber) throw new Error("Phone number provided is invalid!");
+      },
     },
-    viewedRecent: {
-      type: Array,
-      required: true,
-      default: [],
+    registrationSource: { type: String },
+    notificationPreferences: {
+      type: Object,
+      default: {
+        orders: {
+          textMessage: false,
+          email: false,
+          app: true,
+        },
+        offers: {
+          textMessage: false,
+          email: false,
+          app: true,
+        },
+      },
     },
-    idBoards: {
-      type: Array,
-      required: true,
-      default: [],
-    },
+    facebook: { id: { type: String }, token: { type: String } },
+    google: { id: { type: String }, token: { type: String } },
+    confirmationCode: { type: String },
+    confirmationExpires: { type: Date },
+    confirmed: { type: Boolean, default: false },
+    avatar: { type: String },
+    deleted: { type: Boolean, required: true, default: false },
     tokens: [
       {
         token: {
@@ -55,11 +68,28 @@ const UserSchema = new mongoose.Schema(
         },
       },
     ],
+    resetPasswordToken: { type: String },
+    resetPasswordExpires: { type: Date },
+    resetPasswordCode: { type: String },
+    isStoreOwner: { type: Boolean, default: false },
+    devices: { type: Array, required: true, default: [] },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true, toJSON: { virtuals: true } }
 );
+
+UserSchema.virtual("addressBook", {
+  ref: "UserAddress",
+  localField: "_id",
+  foreignField: "owner",
+  justOne: false,
+});
+
+UserSchema.virtual("store", {
+  ref: "Store",
+  localField: "_id",
+  foreignField: "owner",
+  justOne: false,
+});
 
 UserSchema.methods.toJSON = function () {
   const user = this;
@@ -67,38 +97,119 @@ UserSchema.methods.toJSON = function () {
 
   delete userObject.password;
   delete userObject.tokens;
-
+  delete userObject._id;
   return userObject;
 };
 
-UserSchema.methods.getAuthToken = async function () {
+UserSchema.methods.getAuthToken = async function (next, callback) {
   const user = this;
-  const token = jwt.sign(
-    { _id: user._id.toString(), expiresIn: 3600 },
-    TOKEN_SIGNATURE
-  );
-  user.tokens = user.tokens.concat({ token });
-  await user.save();
-  return token;
+  const KEY_IDENTIFIER = getRandom(20);
+
+  return user.runEncryption(next, null, `${KEY_IDENTIFIER}`, async (hash) => {
+    const token = jwt.sign(
+      {
+        algorithm: "RS256",
+        _id: user._id.toString(),
+        expiresIn: 3600,
+        kid: `kid-${hash}`,
+      },
+      PRIVATE_SIGNATURE
+    );
+    user.tokens = user.tokens.concat({ token });
+
+    await user.save();
+
+    callback(token);
+  });
 };
 
-UserSchema.statics.findByCredentials = async (email, password) => {
-  const user = await User.findOne({ email });
+UserSchema.statics.findByCredentials = async function (
+  email,
+  password,
+  facebookId,
+  googleId
+) {
+  let isMatch;
+  let user;
+  if (email && !googleId) {
+    user = await this.findOne({ email });
+    if (!user) throw new Error("Login error: check your email or password.");
+    isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) throw new Error("Login error: check your email or password.");
+  } else if (facebookId) {
+    user = await this.findOne({ "facebook.id": facebookId });
+    if (!user) throw new Error("Failed to retrieve you account");
+  } else if (googleId) {
+    user = await this.findOne({ email, "google.id": googleId });
+    if (!user) throw new Error("Failed to retrieve you account");
+  }
 
-  if (!user) throw new Error("Unable to login");
-
-  const isMatch = await bcrypt.compare(password, user.password);
-  if (!isMatch) throw new Error("Unable to login");
   return user;
 };
 
-UserSchema.pre("save", async function (next) {
+UserSchema.methods.runEncryption = function (
+  next,
+  targetId,
+  stringToHash,
+  callback
+) {
+  const user = this;
+  const SALT_FACTOR = 12;
+  return bcrypt.genSalt(SALT_FACTOR, (err, salt) => {
+    if (err) return next(err);
+
+    return bcrypt.hash(stringToHash || user[targetId], salt, (error, hash) => {
+      if (error) return next(error);
+      if (targetId) user[targetId] = hash;
+      if (!stringToHash) next();
+
+      if (callback) callback(hash);
+    });
+  });
+};
+
+UserSchema.methods.generateAccessCookie = async (res, token) => {
+  res.setHeader("Access-Control-Allow-Origin", ROOT_URL);
+  res.cookie("access_token", token, {
+    maxAge: 9999999,
+    httpOnly: true,
+  });
+
+  await res.append("Set-Cookie", `access_token="${token}";`);
+};
+
+UserSchema.pre("save", function (next) {
+  const user = this;
+  if (!user.isModified("password")) return next();
+  user.runEncryption(next, "password");
+});
+
+UserSchema.pre("save", function (next) {
   const user = this;
 
-  if (user.isModified("password"))
-    user.password = await bcrypt.hash(user.password, 8);
+  if (!user.isModified("email") || user.registrationSource !== "email")
+    return next();
+  const verificationCode = getRandom();
 
-  next();
+  user.runEncryption(
+    next,
+    "confirmationCode",
+    `${verificationCode}`,
+    (hash) => {
+      user.confirmationCode = hash;
+      user.confirmationExpires = Date.now() + tokenExpirationTime;
+
+      const notification = {
+        subject: "Email confirmation!",
+        description: `${
+          user.name || user.email
+        }.Please Verify your email with this code: [${verificationCode}].`,
+      };
+
+      user.confirmed = false;
+      next();
+    }
+  );
 });
 
 const User = mongoose.model("User", UserSchema);
