@@ -1,6 +1,5 @@
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
-const path = require("path");
 
 const { ROOT_URL } = require("../utils/config");
 
