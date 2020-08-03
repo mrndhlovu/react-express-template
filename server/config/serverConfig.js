@@ -4,7 +4,7 @@ const path = require("path");
 
 const { ROOT_URL } = require("../utils/config");
 
-const BUILD_DIR = __dirname;
+const BUILD_DIR = "client/build";
 
 const serverConfig = (app, express) => {
   app.use(express.json());
@@ -16,7 +16,7 @@ const serverConfig = (app, express) => {
     })
   );
 
-  app.use(express.static(path.join(BUILD_DIR, "build")));
+  app.use(express.static(BUILD_DIR));
 };
 
 module.exports = serverConfig;
